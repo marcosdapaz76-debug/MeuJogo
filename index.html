@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Battle Royale Web 3D</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #87CEEB; font-family: Arial, sans-serif; }
+    #mira {
+      position: fixed; top: 50%; left: 50%;
+      width: 16px; height: 16px;
+      border: 2px solid #00ff00; border-radius: 50%;
+      transform: translate(-50%, -50%); pointer-events: none;
+    }
+    #hud {
+      position: fixed; top: 15px; left: 15px;
+      color: white; background: rgba(0,0,0,0.6);
+      padding: 12px 18px; border-radius: 8px; font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="mira"></div>
+  <div id="hud">
+    <b>Controles:</b> Clique na tela para mirar | W A S D: Andar | Espaço: Pular | Clique: Atirar<br>
+    <span id="placar">Abates: 0</span>
+  </div>
+
+  <script src="https://cloudflare.com"></script>
+  <script>
+    // 1. Cena, Câmera e Renderizador
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB);
+    scene.fog = new THREE.Fog(0x87CEEB, 20, 120);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // 2. Luzes
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(20, 50, 20);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x404040, 1.5));
+
+    // 3. Chão (Mapa) e Árvores/Caixas
+    const chao = new THREE.Mesh(
+      new THREE.PlaneGeometry(200, 200),
+      new THREE.MeshLambertMaterial({ color: 0x3b7a57 })
+    );
+    chao.rotation.x = -Math.PI / 2;
+    scene.add(chao);
+
+    for (let i = 0; i < 30; i++) {
+      const caixa = new THREE.Mesh(
+        new THREE.BoxGeometry(3, 3, 3),
+        new THREE.MeshLambertMaterial({ color: 0x8B4513 })
+      );
+      caixa.position.set((Math.random() - 0.5) * 160, 1.5, (Math.random() - 0.5) * 160);
+      scene.add(caixa);
+    }
+
+    // 4. Jogador
+    const player = new THREE.Group();
+    const corpo = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1.8, 0.6),
+      new THREE.MeshLambertMaterial({ color: 0x1e90ff })
+    );
+    corpo.position.y = 0.9;
+    player.add(corpo);
+    scene.add(player);
+
+    // 5. Inimigos (Bots)
+    const inimigos = [];
+    function criarInimigo() {
+      const bot = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1.8, 0.6),
+        new THREE.MeshLambertMaterial({ color: 0xff3333 })
+      );
+      bot.position.set((Math.random() - 0.5) * 120, 0.9, (Math.random() - 0.5) * 120);
+      scene.add(bot);
+      inimigos.push(bot);
+    }
+    for (let i = 0; i < 10; i++) criarInimigo();
+
+    // 6. Controles e Câmera 3ª Pessoa
+    let yaw = 0, pitch = 0.2, velY = 0, noChao = true, abates = 0;
+    const teclas = {};
+    window.addEventListener('keydown', e => teclas[e.code] = true);
+    window.addEventListener('keyup', e => teclas[e.code] = false);
+
+    document.body.addEventListener('click', () => {
+      if (document.pointerLockElement !== document.body) {
+        document.body.requestPointerLock();
+      } else {
+        atirar();
+      }
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (document.pointerLockElement === document.body) {
+        yaw -= e.movementX * 0.002;
+        pitch = Math.max(-0.5, Math.min(1.0, pitch + e.movementY * 0.002));
+      }
+    });
+
+    // 7. Sistema de Tiro
+    const raycaster = new THREE.Raycaster();
+    function atirar() {
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const acertos = raycaster.intersectObjects(inimigos);
+      if (acertos.length > 0) {
+        const alvo = acertos[0].object;
+        scene.remove(alvo);
+        inimigos.splice(inimigos.indexOf(alvo), 1);
+        abates++;
+        document.getElementById('placar').innerText = 'Abates: ' + abates;
+        criarInimigo();
+      }
+    }
+
+    // 8. Loop Principal do Jogo
+    function animar() {
+      requestAnimationFrame(animar);
+
+      player.rotation.y = yaw;
+      const dir = new THREE.Vector3();
+      if (teclas['KeyW']) dir.z -= 1;
+      if (teclas['KeyS']) dir.z += 1;
+      if (teclas['KeyA']) dir.x -= 1;
+      if (teclas['KeyD']) dir.x += 1;
+      dir.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+      player.position.addScaledVector(dir, 0.2);
+
+      if (teclas['Space'] && noChao) { velY = 0.25; noChao = false; }
+      player.position.y += velY;
+      velY -= 0.012;
+      if (player.position.y <= 0) { player.position.y = 0; velY = 0; noChao = true; }
+
+      // Posição da câmera por cima do ombro
+      const offset = new THREE.Vector3(0.8, 2.2 + pitch * 2, 4.5);
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+      camera.position.copy(player.position).add(offset);
+      camera.lookAt(player.position.x, player.position.y + 1.5, player.position.z);
+
+      renderer.render(scene, camera);
+    }
+    animar();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
